@@ -4,6 +4,11 @@
 3. Apply the Metropolis-Hastings algorithm, by finding 'acceptance probability' for each sample and moving the Markov chain. 
 */
 
+/* TODO */
+// 1. Use Array instead of Vec for faster processing
+// 2. Prevent the use of RefCell for x_curr, to explicitely mention outside the struct
+// 3. 'lag' yet to be implemented!! and understood as well!!
+
 
 use rand_distr::{Normal, Uniform, Distribution};
 use std::cell::RefCell;
@@ -11,7 +16,7 @@ use std::cell::RefCell;
 
 pub struct MetropolisHastingSampling<'a>{
     pub x_init: Vec<f32>,
-    pub x_curr: RefCell<Vec<f32>>,  // RefCell allows interior mutability
+    pub x_curr: RefCell<Vec<f32>>,  // RefCell allows interior mutability, so that I dont have to make my struct mutable
     kernel: Option<String>,
     f: &'a dyn Fn(f32)->f32,
 }
@@ -35,10 +40,15 @@ impl<'a> MetropolisHastingSampling<'a> {
         };
     }
 
-    fn sample_gaussian(&self)-> Vec<f32>{
+    fn sample_gaussian(&self, sigma: Option<f32>)-> Vec<f32>{
+
+        let sigma = match sigma{
+            Some(s) => s,
+            None => 1.0,
+        };
 
         // Initialized a Standard Normal Distribution
-        let normal: Normal<f32> = Normal::new(0.0, 1.0).unwrap();
+        let normal: Normal<f32> = Normal::new(0.0, sigma).unwrap();
         // Sampled from the distribution
         let samples: Vec<f32> = (0..self.x_curr.borrow().len())// borrow as non-mutable
                                 .map(|_| normal.sample(&mut rand::thread_rng()))
@@ -53,7 +63,7 @@ impl<'a> MetropolisHastingSampling<'a> {
         return x_proposed;
     }
 
-    fn get_proposal(&self)->Vec<f32>{ // x_t is a Non-Mutable Vector Reference for borrowing
+    fn get_proposal(&self, sigma: Option<f32>)->Vec<f32>{ // x_t is a Non-Mutable Vector Reference for borrowing
 
         /* Sample proposal from given kernel and x_t */
 
@@ -64,7 +74,7 @@ impl<'a> MetropolisHastingSampling<'a> {
             None => kernel_type = String::from("gaussian"),
         }   
         if kernel_type == String::from("gaussian"){
-            return self.sample_gaussian();
+            return self.sample_gaussian(sigma);
         }
         else {
             unimplemented!("Kernel: {} Not Implemented", kernel_type);
@@ -86,9 +96,9 @@ impl<'a> MetropolisHastingSampling<'a> {
     // println!("Kernel: {}", distribution);
     // println!("Precision: {}", f32::EPSILON);
 
-    pub fn step(&self)->(Vec<f32>, Vec<bool>){
+    pub fn step(&self, sigma: Option<f32>)->(Vec<f32>, Vec<bool>){
         
-        let x_proposed = self.get_proposal();
+        let x_proposed = self.get_proposal(sigma);
         let prob = self.get_acceptance_probability(&x_proposed);
         let (x_step, acceptance): (Vec<f32>, Vec<bool>) = (0..self.x_curr.borrow().len())
                                         .map(|i| get_x_next(x_proposed[i], self.x_curr.borrow()[i], prob[i]))
@@ -98,7 +108,7 @@ impl<'a> MetropolisHastingSampling<'a> {
         return (x_proposed, acceptance);
     }
 
-    pub fn sample(&self, num_iter: i32, burnin: Option<i32>, lag: Option<i32>){
+    pub fn sample(&self, num_iter: i32, sigma: Option<f32>, burnin: Option<i32>, lag: Option<i32>){
 
         let burnin = match burnin{
             Some(b) => b,
@@ -109,17 +119,15 @@ impl<'a> MetropolisHastingSampling<'a> {
             None => 1,
         };
 
-        //TODO: lag yet to be implemented!! and understood as well!!
-
         // Warmup
         for _ in 0..burnin{
-            (_, _) = self.step(); // borrow as mutable
+            (_, _) = self.step(sigma); // borrow as mutable
         }
         
         // Iteration
         for _ in 0..num_iter{
             // let (x_proposed, new_vec, acceptance) = metropolis_hasting::step(&vec, None, &target);
-            (_, _) = self.step(); 
+            (_, _) = self.step(sigma); // borrow as mutable
         }
     }
 
