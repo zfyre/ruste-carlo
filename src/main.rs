@@ -10,23 +10,31 @@ fn target(x: f32) -> f32 {
 }
 
 fn main() {
-    let mut vec:Vec<f32> = vec![0.0; 10000]; // five elements of type f32
+    let vec:Vec<f32> = vec![0.0; 10000]; // five elements of type f32
 
     // let x_proposed = metropolis_hasting::get_proposal(&vec, None);
     
     
     let num_iter = 1000;
-    let burnin = (0.1 * num_iter as f32) as i32;
+    // let burnin = (0.1 * num_iter as f32) as i32;
 
 
-    for _ in 0..burnin{
-        (_, vec, _) = metropolis_hasting::step(&vec, None, &target);
-    }
+    // for _ in 0..burnin{
+    //     (_, vec, _) = metropolis_hasting::step(&vec, None, &target);
+    // }
 
-    for _ in 0..num_iter{
+    // for _ in 0..num_iter{
         // let (x_proposed, new_vec, acceptance) = metropolis_hasting::step(&vec, None, &target);
-        (_, vec, _) = metropolis_hasting::step(&vec, None, &target);
-    }
+    //     (_, vec, _) = metropolis_hasting::step(&vec, None, &target);
+    // }
+    let sampler = metropolis_hasting::MetropolisHastingSampling::new(&vec, None, &target);
+    sampler.sample(num_iter, None,None);
+
+    // println!("x_init: {:?}", sampler.x_init);
+    println!("x_curr: {:?}", sampler.x_curr);
+
     
-    print!("x_step: {:?}", vec);
+    
+
+
 }

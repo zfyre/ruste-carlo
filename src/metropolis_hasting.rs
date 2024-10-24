@@ -6,58 +6,15 @@
 
 
 use rand_distr::{Normal, Uniform, Distribution};
+use std::cell::RefCell;
 
 
-fn sample_gaussian(x_t: &Vec<f32>)-> Vec<f32>{
-
-    // Initialized a Standard Normal Distribution
-    let normal: Normal<f32> = Normal::new(0.0, 1.0).unwrap();
-    // Sampled from the distribution
-    let samples: Vec<f32> = (0..x_t.len())
-                            .map(|_| normal.sample(&mut rand::thread_rng()))
-                            .collect();
-    // Added the samples to x_t
-    let mut x_proposed: Vec<f32> = Vec::new();
-    for i in 0..x_t.len(){
-        x_proposed.push(x_t[i] + samples[i]);
-    }
-    let x_proposed = x_proposed; // Made the x_proposed non_mutable
-
-    return x_proposed;
+pub struct MetropolisHastingSampling<'a>{
+    pub x_init: Vec<f32>,
+    pub x_curr: RefCell<Vec<f32>>,  // RefCell allows interior mutability
+    kernel: Option<String>,
+    f: &'a dyn Fn(f32)->f32,
 }
-
-fn get_proposal(x_t: &Vec<f32>,  kernel: Option<String>)->Vec<f32>{ // x_t is a Non-Mutable Vector Reference for borrowing
-
-    /* Sample proposal from given kernel and x_t */
-
-    let  kernel_type: String;
-
-    match kernel{
-        Some(k) => kernel_type = k,
-        None => kernel_type = String::from("gaussian"),
-    }   
-    if kernel_type == String::from("gaussian"){
-        return sample_gaussian(&x_t);
-    }
-    else {
-        unimplemented!("Kernel: {} Not Implemented", kernel_type);
-    }
-}
-
-fn get_acceptance_probability(x_proposed: &Vec<f32>, x_t: &Vec<f32>, f: &dyn Fn(f32)->f32)->Vec<f32> {
-
-    let mut p: Vec<f32> = vec![1.0; x_t.len()];
-    for i in 0..x_t.len(){
-        // Since f32 can represent NaN, we use f32::min & f32::EPSILON to prevent division by zero
-        p[i] = f32::min(p[i], f(x_proposed[i])/(f(x_t[i]) + f32::EPSILON)); 
-        
-    }
-
-    return p;
-}
-
-// println!("Kernel: {}", distribution);
-// println!("Precision: {}", f32::EPSILON);
 
 fn get_x_next(x_proposed_val: f32, x_t_val: f32, prob: f32)->(f32, bool){
     if Uniform::from(0.0..1.0).sample(& mut rand::thread_rng()) < prob{
@@ -67,13 +24,104 @@ fn get_x_next(x_proposed_val: f32, x_t_val: f32, prob: f32)->(f32, bool){
     }
 }
 
-pub fn step(x_t: &Vec<f32>, kernel: Option<String>, f: &dyn Fn(f32)->f32)->(Vec<f32>, Vec<f32>, Vec<bool>){
-    
-    let x_proposed = get_proposal(&x_t, kernel);
-    let prob = get_acceptance_probability(&x_proposed, &x_t, f);
-    let (x_step, acceptance): (Vec<f32>, Vec<bool>) = (0..x_t.len())
-                                    .map(|i| get_x_next(x_proposed[i], x_t[i], prob[i]))
-                                    .unzip();
+impl<'a> MetropolisHastingSampling<'a> {
 
-    return (x_proposed, x_step, acceptance);
+    pub fn new(x_init: &Vec<f32>, kernel: Option<String>, f: &'a dyn Fn(f32)->f32)->MetropolisHastingSampling<'a>{
+        return MetropolisHastingSampling{
+            x_init: x_init.clone(),
+            x_curr: RefCell::new(x_init.clone()),
+            kernel,
+            f,
+        };
+    }
+
+    fn sample_gaussian(&self)-> Vec<f32>{
+
+        // Initialized a Standard Normal Distribution
+        let normal: Normal<f32> = Normal::new(0.0, 1.0).unwrap();
+        // Sampled from the distribution
+        let samples: Vec<f32> = (0..self.x_curr.borrow().len())// borrow as non-mutable
+                                .map(|_| normal.sample(&mut rand::thread_rng()))
+                                .collect();
+        // Added the samples to x_t
+        let mut x_proposed: Vec<f32> = Vec::new();
+        for i in 0..self.x_curr.borrow().len(){
+            x_proposed.push(self.x_curr.borrow()[i] + samples[i]);
+        }
+        let x_proposed = x_proposed; // Made the x_proposed non_mutable
+
+        return x_proposed;
+    }
+
+    fn get_proposal(&self)->Vec<f32>{ // x_t is a Non-Mutable Vector Reference for borrowing
+
+        /* Sample proposal from given kernel and x_t */
+
+        let  kernel_type: String;
+
+        match &self.kernel{ // Borrowing here otherwise value gets moved to 'k'
+            Some(k) => kernel_type = k.to_string(), // Used to_string because k is a reference
+            None => kernel_type = String::from("gaussian"),
+        }   
+        if kernel_type == String::from("gaussian"){
+            return self.sample_gaussian();
+        }
+        else {
+            unimplemented!("Kernel: {} Not Implemented", kernel_type);
+        }
+    }
+
+    fn get_acceptance_probability(&self, x_proposed: &Vec<f32>)->Vec<f32> {
+
+        let mut p: Vec<f32> = vec![1.0; self.x_curr.borrow().len()];
+        for i in 0..self.x_curr.borrow().len(){
+            // Since f32 can represent NaN, we use f32::min & f32::EPSILON to prevent division by zero
+            p[i] = f32::min(p[i], (self.f)(x_proposed[i])/((self.f)(self.x_curr.borrow()[i]) + f32::EPSILON)); 
+            
+        }//  In Rust, when accessing a function pointer or a reference to a function, you need to use parentheses to call it, as it's treated like a value.
+
+        return p;
+    }
+
+    // println!("Kernel: {}", distribution);
+    // println!("Precision: {}", f32::EPSILON);
+
+    pub fn step(&self)->(Vec<f32>, Vec<bool>){
+        
+        let x_proposed = self.get_proposal();
+        let prob = self.get_acceptance_probability(&x_proposed);
+        let (x_step, acceptance): (Vec<f32>, Vec<bool>) = (0..self.x_curr.borrow().len())
+                                        .map(|i| get_x_next(x_proposed[i], self.x_curr.borrow()[i], prob[i]))
+                                        .unzip();
+
+        *self.x_curr.borrow_mut() = x_step;
+        return (x_proposed, acceptance);
+    }
+
+    pub fn sample(&self, num_iter: i32, burnin: Option<i32>, lag: Option<i32>){
+
+        let burnin = match burnin{
+            Some(b) => b,
+            None => (0.1 * num_iter as f32) as i32,
+        };
+        let _lag = match lag{
+            Some(l) => l,
+            None => 1,
+        };
+
+        //TODO: lag yet to be implemented!! and understood as well!!
+
+        // Warmup
+        for _ in 0..burnin{
+            (_, _) = self.step(); // borrow as mutable
+        }
+        
+        // Iteration
+        for _ in 0..num_iter{
+            // let (x_proposed, new_vec, acceptance) = metropolis_hasting::step(&vec, None, &target);
+            (_, _) = self.step(); 
+        }
+    }
+
 }
+
